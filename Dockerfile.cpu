@@ -1,3 +1,4 @@
+# syntax=docker/dockerfile:1.7
 # Parakeet TDT 0.6B ONNX - CPU Dockerfile
 # High-performance speech transcription on CPU
 
@@ -10,9 +11,10 @@ LABEL description="ONNX-optimized speech transcription service (CPU)"
 ENV DEBIAN_FRONTEND=noninteractive
 
 # Install system dependencies
-RUN apt-get update && apt-get install -y --no-install-recommends \
+RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
+    --mount=type=cache,target=/var/lib/apt/lists,sharing=locked \
+    apt-get update && apt-get install -y --no-install-recommends \
     ffmpeg \
-    && rm -rf /var/lib/apt/lists/* \
     && apt-get clean
 
 # Create non-root user for security
@@ -23,11 +25,20 @@ WORKDIR /app
 COPY requirements.txt .
 
 # Install Python dependencies. requirements.txt is GPU-first, so the CPU image
-# swaps onnxruntime-gpu for onnxruntime.
-RUN pip install --no-cache-dir --upgrade pip && \
-    grep -v '^onnxruntime-gpu' requirements.txt > /tmp/requirements.cpu.txt && \
-    pip install --no-cache-dir -r /tmp/requirements.cpu.txt && \
-    pip install --no-cache-dir onnxruntime==1.26.0
+# swaps onnxruntime-gpu for onnxruntime and pins the CPU PyTorch wheel stack.
+ARG PYTORCH_CPU_INDEX_URL=https://download.pytorch.org/whl/cpu
+ARG TORCH_VERSION=2.6.0
+ARG TORCHAUDIO_VERSION=2.6.0
+ARG ONNXRUNTIME_VERSION=1.23.2
+RUN --mount=type=cache,target=/root/.cache/pip \
+    pip install --upgrade pip && \
+    pip install \
+      --index-url ${PYTORCH_CPU_INDEX_URL} \
+      torch==${TORCH_VERSION} \
+      torchaudio==${TORCHAUDIO_VERSION} && \
+    grep -Ev '^(onnxruntime-gpu|torch|torchaudio)([<=> ].*)?$' requirements.txt > /tmp/requirements.cpu.txt && \
+    pip install -r /tmp/requirements.cpu.txt && \
+    pip install onnxruntime==${ONNXRUNTIME_VERSION}
 
 # Copy application code
 COPY server.py .
